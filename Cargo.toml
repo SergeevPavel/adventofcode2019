@@ -1,0 +1,25 @@
+[package]
+name = "adventofcode2019"
+version = "0.1.0"
+authors = ["Pavel Sergeev <pavel.sergeev@jetbrains.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "day1a"
+path = "src/day1a.rs"
+
+[[bin]]
+name = "day1b"
+path = "src/day1b.rs"
+
+[[bin]]
+name = "day2a"
+path = "src/day2a.rs"
+
+[[bin]]
+name = "day2b"
+path = "src/day2b.rs"
+
+[dependencies]

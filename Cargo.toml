@@ -90,5 +90,10 @@ path = "src/day12a.rs"
 name = "day12b"
 path = "src/day12b.rs"
 
+[[bin]]
+name = "day13"
+path = "src/day13.rs"
+
 [dependencies]
 regex = "1.3.1"
+termion = "1.5.2"

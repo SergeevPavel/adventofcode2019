@@ -8,6 +8,7 @@ use termion::input::TermRead;
 use std::io::Write;
 use termion::event::Key;
 use regex::internal::Program;
+use std::cmp::Ordering;
 
 #[derive(Clone)]
 struct Memory {
@@ -206,6 +207,14 @@ impl Screen {
         });
     }
 
+    fn paddle_pos(&self) -> (u64, u64) {
+        *self.pixels.iter().filter(|(p, s)| **s == 3).next().unwrap().0
+    }
+
+    fn ball_pos(&self) -> (u64, u64) {
+        *self.pixels.iter().filter(|(p, s)| **s == 4).next().unwrap().0
+    }
+
     fn draw(&self, out: &mut dyn Write) {
         write!(out, "{}{}", termion::clear::All, termion::cursor::Goto(1, 1));
         for y in 0..(self.max_y + 1) {
@@ -287,7 +296,9 @@ fn main() {
 
     let mut stdout = io::stdout().into_raw_mode().unwrap();
     let mut stdin = termion::async_stdin().keys();
-    let mut arcade = TimeMachine::new(Arcade::new(&program));
+    let mut a = Arcade::new(&program);
+    a.step(0);
+    let mut arcade = TimeMachine::new(a);
 
     loop {
         let input = match stdin.by_ref().filter_map(|ch| ch.ok()).last() {
@@ -309,8 +320,14 @@ fn main() {
             }
             _ => {
                 if !arcade.now().computer.halted {
+                    let ball_pos = arcade.now().screen.ball_pos();
+                    let paddle_pos = arcade.now().screen.paddle_pos();
                     arcade.apply(|a| {
-                        a.step(0);
+                        match ball_pos.0.cmp(&paddle_pos.0) {
+                            Ordering::Less => a.step(-1),
+                            Ordering::Equal => a.step(0),
+                            Ordering::Greater => a.step(1),
+                        }
                     })
                 }
             }
@@ -318,6 +335,6 @@ fn main() {
 
         arcade.now().screen.draw(&mut stdout);
         stdout.flush().unwrap();
-        std::thread::sleep(Duration::from_millis(300));
+        std::thread::sleep(Duration::from_millis(60));
     }
 }

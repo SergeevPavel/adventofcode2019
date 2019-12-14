@@ -267,7 +267,7 @@ impl TimeMachine {
         }
     }
 
-    fn apply<F>(&mut self, f: F) where F: FnOnce(&mut Arcade)  {
+    fn tick<F>(&mut self, f: F) where F: FnOnce(&mut Arcade)  {
         let mut next = self.moments.last().unwrap().clone();
         f(&mut next);
         self.moments.push(next);
@@ -301,14 +301,14 @@ fn main() {
     let mut arcade = TimeMachine::new(a);
 
     loop {
-        let input = match stdin.by_ref().filter_map(|ch| ch.ok()).last() {
+        match stdin.by_ref().filter_map(|ch| ch.ok()).last() {
             Some(Key::Left) => {
-                arcade.apply(|a| {
+                arcade.tick(|a| {
                     a.step(-1)
                 })
             },
             Some(Key::Right) => {
-                arcade.apply(|a| {
+                arcade.tick(|a| {
                     a.step(1)
                 })
             },
@@ -322,7 +322,7 @@ fn main() {
                 if !arcade.now().computer.halted {
                     let ball_pos = arcade.now().screen.ball_pos();
                     let paddle_pos = arcade.now().screen.paddle_pos();
-                    arcade.apply(|a| {
+                    arcade.tick(|a| {
                         match ball_pos.0.cmp(&paddle_pos.0) {
                             Ordering::Less => a.step(-1),
                             Ordering::Equal => a.step(0),

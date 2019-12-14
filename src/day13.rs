@@ -7,8 +7,9 @@ use termion::raw::IntoRawMode;
 use termion::input::TermRead;
 use std::io::Write;
 use termion::event::Key;
+use regex::internal::Program;
 
-
+#[derive(Clone)]
 struct Memory {
     inner: HashMap<i64, i64>
 }
@@ -35,6 +36,7 @@ impl IndexMut<i64> for Memory {
     }
 }
 
+#[derive(Clone)]
 struct Computer {
     memory: Memory,
     pc: i64,
@@ -173,6 +175,7 @@ impl Computer {
     }
 }
 
+#[derive(Clone)]
 struct Screen {
     pixels: HashMap<(u64, u64), u8>,
     max_x: u64,
@@ -222,6 +225,54 @@ impl Screen {
     }
 }
 
+#[derive(Clone)]
+struct Arcade {
+    pub computer: Computer,
+    pub screen: Screen
+}
+
+impl Arcade {
+    fn new(program: &Vec<i64>) -> Self {
+        Arcade {
+            computer: Computer::new(program),
+            screen: Screen::new()
+        }
+    }
+
+    fn step(&mut self, input: i64) {
+        if !self.computer.halted {
+            let output = self.computer.run(vec![input]).unwrap();
+            self.screen.update(&output);
+        }
+    }
+}
+
+struct TimeMachine {
+    moments: Vec<Arcade>
+}
+
+impl TimeMachine {
+    fn new(arcade: Arcade) -> Self {
+        TimeMachine {
+            moments: vec![arcade]
+        }
+    }
+
+    fn apply<F>(&mut self, f: F) where F: FnOnce(&mut Arcade)  {
+        let mut next = self.moments.last().unwrap().clone();
+        f(&mut next);
+        self.moments.push(next);
+    }
+
+    fn playback(&mut self) {
+        self.moments.pop();
+    }
+
+    fn now(&self) -> &Arcade {
+        self.moments.last().unwrap()
+    }
+}
+
 fn main() {
     let mut program: Vec<i64> = read_to_string("inputs/day13.txt").unwrap()
         .split(",")
@@ -233,22 +284,40 @@ fn main() {
             v
         })
         .collect();
-    let mut c = Computer::new(&program);
-    let mut screen = Screen::new();
 
     let mut stdout = io::stdout().into_raw_mode().unwrap();
     let mut stdin = termion::async_stdin().keys();
+    let mut arcade = TimeMachine::new(Arcade::new(&program));
 
-    while !c.halted {
+    loop {
         let input = match stdin.by_ref().filter_map(|ch| ch.ok()).last() {
-            Some(Key::Left) => -1,
-            Some(Key::Right) => 1,
-            _ => 0
+            Some(Key::Left) => {
+                arcade.apply(|a| {
+                    a.step(-1)
+                })
+            },
+            Some(Key::Right) => {
+                arcade.apply(|a| {
+                    a.step(1)
+                })
+            },
+            Some(Key::Esc) => {
+                break;
+            }
+            Some(Key::Down) => {
+                arcade.playback();
+            }
+            _ => {
+                if !arcade.now().computer.halted {
+                    arcade.apply(|a| {
+                        a.step(0);
+                    })
+                }
+            }
         };
-        let output = c.run(vec![input]).unwrap();
-        screen.update(&output);
-        screen.draw(&mut stdout);
+
+        arcade.now().screen.draw(&mut stdout);
         stdout.flush().unwrap();
-        std::thread::sleep(Duration::from_millis(1000));
+        std::thread::sleep(Duration::from_millis(300));
     }
 }

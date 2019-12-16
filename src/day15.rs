@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::{Index, IndexMut, Rem, RemAssign};
 use std::fs::read_to_string;
 use std::time::Duration;
@@ -182,15 +182,16 @@ struct Point {
     y: i64
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 enum CellTypes {
+    Start,
     Empty,
     Wall,
     OxSystem
 }
 
 struct Field {
-    robot: Point,
+    bot_position: Point,
     cells: HashMap<Point, CellTypes>
 }
 
@@ -198,9 +199,9 @@ impl Field {
     fn new() -> Self {
         let mut cells: HashMap<Point, CellTypes> = Default::default();
         let robot = Point { x: 0, y: 0 };
-        cells.insert(robot.clone(), CellTypes::Empty);
+        cells.insert(robot.clone(), CellTypes::Start);
         Field {
-            robot,
+            bot_position: robot,
             cells
         }
     }
@@ -215,12 +216,152 @@ fn draw(field: &Field, out: &mut dyn Write) {
     write!(out, "{}", termion::clear::All);
     field.cells.iter().for_each(|(p, t)| {
         match t {
+            CellTypes::Start => write!(out, "{}*.", to_term(p)),
             CellTypes::Empty => write!(out, "{}.", to_term(p)),
             CellTypes::Wall => write!(out, "{}#", to_term(p)),
             CellTypes::OxSystem => write!(out, "{}@", to_term(p)),
         };
     });
-    write!(out, "{}D{}", to_term(&field.robot), termion::cursor::Goto(1, 1));
+    write!(out, "{}D{}", to_term(&field.bot_position), termion::cursor::Goto(1, 1));
+    out.flush().unwrap();
+//    std::thread::sleep(Duration::from_millis(30));
+}
+
+struct Droid {
+    field: Field,
+    computer: Computer
+}
+
+#[derive(Debug, Copy, Clone)]
+enum Directions {
+    Up,
+    Down,
+    Left,
+    Right
+}
+
+impl Directions {
+    fn inv(&self) -> Self {
+        match self {
+            Up => Down,
+            Down => Up,
+            Left => Right,
+            Right => Left,
+        }
+    }
+
+    fn do_move(&self, mut p: Point) -> Point {
+        match self {
+            Directions::Up => {
+                p.y -= 1;
+            },
+            Directions::Down => {
+                p.y += 1;
+            },
+            Directions::Left => {
+                p.x -= 1;
+            },
+            Directions::Right => {
+                p.x += 1;
+            },
+        }
+        p
+    }
+}
+
+impl Droid {
+    fn step(&mut self, direction: Directions) -> bool {
+        if !self.computer.halted {
+            let encoded_input = match direction {
+                Directions::Up    => 1,
+                Directions::Down  => 2,
+                Directions::Left  => 3,
+                Directions::Right => 4,
+            };
+            let next_point = self.next_point(direction);
+            let output = self.computer.run(vec![encoded_input]).unwrap();
+            match output[0] {
+                0 => {
+                    self.field.cells.entry(next_point).or_insert(CellTypes::Wall);
+                    return false;
+                }
+                1 => {
+                    self.field.cells.entry(next_point).or_insert(CellTypes::Empty);
+                    self.field.bot_position = next_point;
+                    return true;
+                }
+                2 => {
+                    self.field.cells.entry(next_point).or_insert(CellTypes::OxSystem);
+                    self.field.bot_position = next_point;
+                    return true;
+                }
+                _ => {
+                    return false;
+                }
+            }
+        }
+        return false;
+    }
+
+    fn next_point(&self, direction: Directions) -> Point {
+        direction.do_move(self.field.bot_position)
+    }
+}
+
+use Directions::*;
+use crate::CellTypes::*;
+
+fn ox_system_distance(field: &Field) -> i64 {
+    let (start, _) = field.cells.iter().filter(|(p, ct)| **ct == Start).next().unwrap();
+    let mut q = VecDeque::new();
+    let mut visited = HashSet::new();
+    visited.insert(*start);
+    q.push_back((*start, 0));
+    while !q.is_empty() {
+        let (current, dst) = q.pop_front().unwrap();
+        for dir in [Up, Down, Left, Right].iter() {
+            let next = dir.do_move(current);
+            match field.cells.get(&next).unwrap() {
+                Empty => {
+                    if !visited.contains(&next) {
+                        q.push_back((next, dst + 1));
+                        visited.insert(next);
+                    }
+                },
+                OxSystem => {
+                    return dst + 1;
+                },
+                _ => {}
+            };
+        }
+    }
+    return -1;
+}
+
+fn filling_time(field: &Field) -> i64 {
+    let (start, _) = field.cells.iter().filter(|(p, ct)| **ct == OxSystem).next().unwrap();
+    let mut q = VecDeque::new();
+    let mut visited = HashSet::new();
+    visited.insert(*start);
+    q.push_back((*start, 0));
+    let mut max_dist = 0;
+    while !q.is_empty() {
+        let (current, dst) = q.pop_front().unwrap();
+        for dir in [Up, Down, Left, Right].iter() {
+            let next = dir.do_move(current);
+            match field.cells.get(&next).unwrap() {
+                Empty | Start => {
+                    if !visited.contains(&next) {
+                        max_dist = max_dist.max(dst + 1);
+                        q.push_back((next, dst + 1));
+                        visited.insert(next);
+                    }
+                },
+                _ => {}
+            };
+        }
+    }
+    return max_dist;
 }
 
 fn main() {
@@ -238,54 +379,53 @@ fn main() {
     let mut stdout = io::stdout().into_raw_mode().unwrap();
     let mut stdin = termion::async_stdin().keys();
 
-    let mut field = Field::new();
-    let mut computer = Computer::new(&program);
+    let mut droid = Droid {
+        field: Field::new(),
+        computer: Computer::new(&program)
+    };
+
+    let mut stack = vec![];
+    let mut rest_directions = vec![Up, Down, Left, Right];
 
     loop {
-        let user_input = match stdin.by_ref().filter_map(|ch| ch.ok()).last() {
-            Some(Key::Up) => Some((0, -1)),
-            Some(Key::Down) => Some((0, 1)),
-            Some(Key::Left) => Some((-1, 0)),
-            Some(Key::Right) => Some((1, 0)),
-            Some(Key::Esc) => {
-                break;
-            },
-            _ => None
-        };
-
-        user_input.map(|i| {
-           if !computer.halted {
-               let encoded_input = match i {
-                   (0, -1) => 1,
-                   (0, 1) => 2,
-                   (-1, 0) => 3,
-                   (1, 0) => 4,
-                   _ => unreachable!()
-               };
-               let next_point = Point {
-                   x: field.robot.x + i.0,
-                   y: field.robot.y + i.1
-               };
-               let output = computer.run(vec![encoded_input]).unwrap();
-               match output[0] {
-                   0 => {
-                       field.cells.insert(next_point, CellTypes::Wall);
-                   }
-                   1 => {
-                       field.cells.insert(next_point, CellTypes::Empty);
-                       field.robot = next_point;
-                   }
-                   2 => {
-                       field.cells.insert(next_point, CellTypes::OxSystem);
-                       field.robot = next_point;
-                   }
-                   _ => {}
-               }
-           }
-        });
-
-        draw(&field, &mut stdout);
-        stdout.flush().unwrap();
-        std::thread::sleep(Duration::from_millis(60));
+        while !rest_directions.is_empty() {
+            let dir = rest_directions.pop().unwrap();
+            let next_point = droid.next_point(dir);
+            if !droid.field.cells.contains_key(&next_point) {
+                if droid.step(dir) {
+//                    draw(&droid.field, &mut stdout);
+                    stack.push((rest_directions.clone(), dir));
+                    rest_directions = vec![Up, Down, Left, Right];
+                }
+            }
+        }
+        if let Some((back_rest_directions, dir)) = stack.pop() {
+            rest_directions = back_rest_directions;
+            droid.step(dir.inv());
+//            draw(&droid.field, &mut stdout);
+        } else {
+            break;
+        }
     }
+    writeln!(stdout, "Distance: {:?}", ox_system_distance(&droid.field));
+    writeln!(stdout, "Filling time: {:?}", filling_time(&droid.field));
+
+//    loop {
+//        match stdin.by_ref().filter_map(|ch| ch.ok()).last() {
+//            Some(Key::Up)    => Some(Directions::Up),
+//            Some(Key::Down)  => Some(Directions::Down),
+//            Some(Key::Left)  => Some(Directions::Left),
+//            Some(Key::Right) => Some(Directions::Right),
+//            Some(Key::Esc)   => {
+//                break;
+//            },
+//            _ => None
+//        }.map(|i| {
+//            droid.step(i);
+//        });
+//
+//        draw(&droid.field, &mut stdout);
+//        stdout.flush().unwrap();
+//        std::thread::sleep(Duration::from_millis(60));
+//    }
 }

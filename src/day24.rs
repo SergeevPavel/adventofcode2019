@@ -143,7 +143,7 @@ fn evolve(field: &Field) -> Field {
                     }
                 } else {
                     let neighbors = field.neighbors(i, j, l);
-                    if neighbors == 1 || neighbors == 2{
+                    if neighbors == 1 || neighbors == 2 {
                         next_filed.set(i, j, l, true);
                     }
                 }
